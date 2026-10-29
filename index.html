@@ -95,6 +95,16 @@ body.tension #bg .stripes{animation-duration:1.2s}
 .opp.solved{background:var(--green)}
 .opp.failed{background:#ffb3bd}
 .opp.bump{animation:bump .5s}
+.opp[data-act]{cursor:pointer}
+.opp .eye{display:none;font-size:13px;margin-left:2px}
+.opps.peek .opp:not(.me) .eye{display:inline}
+.opps.peek .opp:not(.me){outline:2px dashed #fff;outline-offset:2px}
+.grid-mini.big .slot{--peg:26px}
+.grid-mini.big .gm-r{gap:10px;margin-bottom:6px}
+.grid-mini .gm-r.last{background:var(--yellow);border-radius:8px;margin-left:-4px;padding-left:4px}
+.peek-st{text-align:center;font-size:14px;margin-bottom:6px}
+.peek-nav{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.peek-nav .mh{flex:1;text-align:center;margin:0;font-size:22px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @keyframes bump{30%{transform:scale(1.12) rotate(-3deg)}}
 .opp .on{font-size:13px;max-width:86px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1}
 .opp .ot{font-size:11px;opacity:.75;display:flex;align-items:center;gap:4px}
@@ -640,8 +650,8 @@ function avatarHtml(id, name, av) {
   if (av) return `<img class="av" src="${esc(av)}" data-chadgang-id="${esc(id)}" alt="">`;
   return `<div class="av" data-chadgang-id="${esc(id)}" style="background:${hueOf(id)}">${esc((name || '?').trim().charAt(0).toUpperCase() || '?')}</div>`;
 }
-function gridMini(rows, d, title) {
-  return `<div class="grid-mini"><div class="gm-t">${title}</div>${rows.length ? rows.map((r, i) => `<div class="gm-r"><b style="width:18px;font-size:12px">${i + 1}</b><span class="gm-p">${(r.g || []).map(c => pegHtml(c)).join('')}</span>${miniFb(r.b, r.w, d.pegs)}</div>`).join('') : '<div style="font-size:13px;opacity:.6">Aucun essai</div>'}</div>`;
+function gridMini(rows, d, title, big = false, tail = '') {
+  return `<div class="grid-mini ${big ? 'big' : ''}">${title ? `<div class="gm-t">${title}</div>` : ''}${rows.length ? rows.map((r, i) => `<div class="gm-r ${big && i === rows.length - 1 ? 'last' : ''}"><b style="width:18px;font-size:12px">${i + 1}</b><span class="gm-p">${(r.g || []).map(c => pegHtml(c)).join('')}</span>${miniFb(r.b, r.w, d.pegs)}</div>`).join('') : '<div style="font-size:13px;opacity:.6">Aucun essai pour l\'instant</div>'}${tail}</div>`;
 }
 
 /* =========================================================
@@ -896,7 +906,7 @@ async function lose() {
 function afterRound() {
   if (G.mode === 'solo') soloEnd();
   else if (G.mode === 'duel') duelRoundEnd();
-  else if (G.mode === 'online') { G.busy = false; updateWait(); }
+  else if (G.mode === 'online') { G.busy = false; updateWait(); renderOpps(); }
 }
 
 function saveProgress() {
@@ -1110,6 +1120,7 @@ function onPlayers() {
   }
   if (Net.s?.phase === 'play' && G?.mode === 'online' && !G.spect && G.rows.length) sendProg();
   renderLobby(); renderOpps(); updateWait();
+  if ($('#peekModal')) renderPeek();
   if (Net.s?.phase === 'end' && modalOpen() && $('#endModal')) renderOnlineEnd(Net.s);
 }
 
@@ -1189,7 +1200,7 @@ function applyState(ns, initial) {
   }
   if (ns.phase === 'play') {
     if (!G || G.mode !== 'online' || G.gid !== ns.gid) startOnline(ns, !!initial || (prev && prev.gid === ns.gid));
-    else { oppEvents(prev, ns); renderOpps(); updateWait(); }
+    else { oppEvents(prev, ns); renderOpps(); updateWait(); if ($('#peekModal')) renderPeek(); }
     return;
   }
   if (ns.phase === 'end') {
@@ -1260,12 +1271,13 @@ function renderOpps() {
   const prevHtml = {};
   $$('#opps .opp').forEach(o => prevHtml[o.dataset.id] = o.dataset.sig);
   const ids = Object.keys(ns.parts).sort((a, b) => (a === Net.me ? -1 : b === Net.me ? 1 : 0));
+  box.classList.toggle('peek', canPeek());
   box.innerHTML = ids.map(id => {
     const p = ns.parts[id], last = p.rows[p.rows.length - 1];
     const st = p.solved ? '🔓' : p.done ? '💀' : !pr.has(id) ? '🏳️' : '⏳';
     const sig = `${p.rows.length}-${p.done}`;
     const cls = [id === Net.me ? 'me' : '', p.solved ? 'solved' : p.done ? 'failed' : '', !pr.has(id) ? 'gone' : '', prevHtml[id] && prevHtml[id] !== sig ? 'bump' : ''].join(' ');
-    return `<div class="opp ${cls}" data-id="${esc(id)}" data-sig="${sig}">${avatarHtml(id, p.name, avOf(id))}<div><div class="on">${esc(p.name)}${id === Net.me ? ' (toi)' : ''}</div><div class="ot">${st} ${p.rows.length}/${d.tries} ${last ? miniFb(last.b, last.w, d.pegs) : ''}</div></div></div>`;
+    return `<div class="opp ${cls}" data-id="${esc(id)}" data-sig="${sig}" ${id === Net.me ? '' : 'data-act="oppPeek"'}>${avatarHtml(id, p.name, avOf(id))}<div><div class="on">${esc(p.name)}${id === Net.me ? ' (toi)' : ''}<span class="eye">👁️</span></div><div class="ot">${st} ${p.rows.length}/${d.tries} ${last ? miniFb(last.b, last.w, d.pegs) : ''}</div></div></div>`;
   }).join('');
 }
 
@@ -1277,6 +1289,7 @@ function updateWait() {
   const done = act.filter(([, p]) => p.done).length;
   w.classList.remove('hidden');
   w.innerHTML = `<div>${G.spect ? '👀 Tu regardes cette manche, tu joueras à la suivante' : (G.won ? '🔓 Code cracké !' : '💀 Raté…') + ' On attend les autres'}<span class="dots"></span> <b>(${done}/${act.length})</b></div>
+    ${others().length ? '<button class="btn" data-act="oppPeek">👁️ Espionner les grilles des autres</button>' : ''}
     ${Net.host ? '<button class="btn white" data-act="forceEnd">⏹️ Terminer la manche maintenant</button>' : ''}`;
 }
 
@@ -1331,6 +1344,23 @@ function renderLobby() {
     <div class="card lcard"><div class="ttl">🎚️ Difficulté <small>${host ? 'c\'est toi qui choisis' : 'choisie par l\'hôte'}</small></div><div class="diffs">${Object.values(DIFFS).map(d => `<button class="diff ${d.key === ns.diff ? 'on' : ''}" data-act="setDiff" data-k="${d.key}" ${host ? '' : 'disabled'}><span class="de">${d.emoji}</span><span class="dl">${d.label}<small>${diffDesc(d)}</small></span></button>`).join('')}</div></div>
     ${host ? `<button class="btn big go" id="bStart" data-act="start" ${n < 2 ? 'disabled' : ''} style="justify-content:center;font-family:var(--title);font-weight:400;font-size:24px">🚀 ${n < 2 ? 'Attends tes potes…' : 'LANCER LA COURSE'}</button>` : `<p class="lwait">⏳ En attente que l'hôte lance la partie<span class="dots"></span></p>`}
     <div class="card lcard" style="font-size:14px;font-weight:700;line-height:1.4">🏁 <b>Course au code</b> : tout le monde cherche <b>le même code</b> en même temps. Celui qui le cracke en <b>moins de coups</b> gagne, le chrono départage les égalités. Tu vois la progression des autres en direct, mais pas leurs couleurs 😏</div>`;
+}
+
+const canPeek = () => !!(G && G.mode === 'online' && (G.over || G.spect) && !G.busy && Net.s && Net.s.phase === 'play');
+const others = () => Object.keys(Net.s?.parts || {}).filter(id => id !== Net.me);
+function renderPeek() {
+  const ns = Net.s; if (!ns || ns.phase !== 'play' || !canPeek()) { if ($('#peekModal')) closeModal(); return; }
+  const o = others(); if (!o.includes(Net.peekId)) Net.peekId = o[0];
+  const id = Net.peekId, p = ns.parts[id]; if (!p) return;
+  const d = ns.cfg, gone = !present().has(id);
+  const st = p.solved ? `🔓 A cracké le code en ${plural(p.rows.length, 'coup')} (${fmtT(p.ms)})` : p.done ? '💀 N\'a pas trouvé le code' : gone ? '🏳️ A quitté la salle' : `⏳ En train de chercher… essai ${p.rows.length + 1}/${d.tries}`;
+  const tail = !p.done && !gone ? '<div class="gm-r" style="opacity:.55;font-size:13px">…<span class="dots"></span></div>' : '';
+  const nav = o.length > 1;
+  openModal(`<div id="peekModal"></div><div class="peek-nav">${nav ? '<button class="ibtn" data-act="peekNav" data-d="-1">◀</button>' : ''}<div class="mh">👁️ ${esc(p.name)}</div>${nav ? '<button class="ibtn" data-act="peekNav" data-d="1">▶</button>' : ''}</div>
+    <div class="peek-st">${st}</div>
+    ${gridMini(p.rows, d, '', true, tail)}
+    <p style="font-size:12px;opacity:.6;text-align:center;margin-top:8px">Mise à jour en direct à chaque coup${nav ? ` · ${o.indexOf(id) + 1}/${o.length}` : ''}</p>
+    <div class="mbtns"><button class="btn go" data-act="close">Fermer</button></div>`);
 }
 
 function showReact(e, from) {
@@ -1418,6 +1448,13 @@ const ACT = {
     const id = t.dataset.id, p = Net.s?.parts?.[id]; if (!p) return;
     $('#peek').innerHTML = gridMini(p.rows, Net.s.cfg, `Grille de <b>${esc(p.name)}</b>`);
   },
+  oppPeek: t => {
+    if (!canPeek()) { toast('🔒 Finis ta grille d\'abord, après tu pourras espionner les autres 😏', '', 2500); Sfx.err(); return; }
+    const o = others(); if (!o.length) return;
+    Net.peekId = t.dataset.id && o.includes(t.dataset.id) ? t.dataset.id : (o.includes(Net.peekId) ? Net.peekId : o[0]);
+    Sfx.whoosh(); renderPeek();
+  },
+  peekNav: t => { const o = others(); if (!o.length) return; const i = o.indexOf(Net.peekId); Net.peekId = o[(i + (+t.dataset.d) + o.length) % o.length]; Sfx.pop(); renderPeek(); },
   react: t => {
     const now = Date.now(); if (now - Net.lastReact < 700 || !Net.room) return; Net.lastReact = now;
     try { Net.room.send({ t: 'react', e: t.dataset.e }); } catch (e) {}
