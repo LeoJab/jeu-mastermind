@@ -134,7 +134,39 @@ body.tension #bg .stripes{animation-duration:1.2s}
 
 /* ---------- plateau ---------- */
 .board{flex:1;min-height:0;overflow-y:auto;padding:4px 12px 10px;scroll-behavior:smooth}
-.board.spect{display:flex;align-items:center;justify-content:center}
+.board{position:relative}
+.board.watch{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;align-items:stretch;scrollbar-width:none}
+.board.watch::-webkit-scrollbar{display:none}
+.wcard{--peg:var(--wpeg);--fbp:var(--wfbp);flex:0 0 100%;scroll-snap-align:center;display:flex;flex-direction:column;min-height:0;background:rgba(18,16,43,.38);border:3px solid var(--ink);border-radius:18px;box-shadow:var(--sh);overflow:hidden;transition:border-color .2s}
+.wcard.focus{border-color:var(--yellow)}
+.wcard.gone{opacity:.5}
+.wcard.pulse{animation:bump .6s}
+.wcard .wh{display:flex;align-items:center;gap:9px;padding:8px 10px;background:#fff;border-bottom:3px solid var(--ink)}
+.wcard.solved .wh{background:var(--green)}
+.wcard.failed .wh{background:#ffb3bd}
+.wn{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.15}
+.wn b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:16px}
+.wn span{font-size:12px;opacity:.75}
+.live{font-size:11px;color:#fff;background:var(--red);border:2px solid var(--ink);border-radius:8px;padding:1px 6px;animation:livep 1.2s infinite;flex:none}
+@keyframes livep{50%{opacity:.5}}
+.wrows{flex:1;min-height:0;overflow-y:auto;padding:8px;position:relative}
+.wcard .row.done:not(.fresh) .fb i{animation:none}
+.wcard .row.done:not(.fresh){transition:none}
+.wcard .row.active .slot{cursor:default}
+.wcard .row.active .slot:not(.peg){animation:thinking 1.3s ease-in-out infinite}
+@keyframes thinking{50%{background:rgba(18,16,43,.28)}}
+.wcard .row.fresh .pegs .slot{animation:lockIn .45s ease}
+.watch-empty{margin:auto;color:#fff;text-align:center;text-shadow:2px 2px 0 var(--ink);padding:30px}
+.opp.focus{outline:3px solid var(--yellow)!important;outline-offset:2px}
+.wait{padding:10px 12px;gap:8px}
+.wait .wbtns{display:flex;gap:8px;width:100%}
+.wait .wbtns .btn{flex:1;padding:9px 10px;font-size:14px}
+.wait .whint{font-size:12px;opacity:.6}
+.secret[data-act]{cursor:pointer}
+@media (min-width:700px){
+  .board.watch{display:grid;grid-auto-rows:max-content;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));overflow-x:hidden;overflow-y:auto;scroll-snap-type:none;align-content:start}
+  .wcard{max-height:min(600px,calc(100dvh - 260px))}
+}
 .row{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:16px;margin-bottom:7px;background:rgba(255,255,255,.07);border:2px dashed rgba(255,255,255,.22);transition:transform .25s,background .25s}
 .row.done{background:#fff;border:3px solid var(--ink);box-shadow:3px 3px 0 var(--ink)}
 .row.active{background:var(--yellow);border:3px solid var(--ink);box-shadow:var(--sh)}
@@ -667,7 +699,7 @@ function newGame({ mode, d, code, title }) {
   G = { mode, d, code: code || genCode(d), rows: [], cur: Array(d.pegs).fill(null), sel: 0, over: false, won: false, busy: false, startT: 0, endT: 0, title };
   return G;
 }
-const rowEl = i => $(`#board .row[data-i="${i}"]`);
+const rowEl = i => $(`#board > .row[data-i="${i}"]`);
 
 function sizeBoard() {
   if (!G) return;
@@ -685,12 +717,33 @@ function sizeBoard() {
 
 function buildBoard() {
   const d = G.d, b = $('#board');
-  b.innerHTML = ''; b.classList.remove('spect');
   sizeBoard();
-  if (G.spect) {
-    b.classList.add('spect');
-    b.innerHTML = `<div class="card" style="padding:18px;text-align:center;max-width:320px"><div class="big-emoji">👀</div><p class="mp" style="margin:6px 0 0">Une manche est déjà en cours.<br>Regarde le carnage, tu joueras à la prochaine !</p></div>`;
-  } else {
+  if (G.view === 'watch') renderWatch();
+  else buildMyRows();
+  // code secret
+  const sp = $('#secretPegs');
+  sp.innerHTML = Array.from({ length: d.pegs }, () => '<span class="slot hid"></span>').join('');
+  $('#secret').classList.remove('cracked', 'failed');
+  $('#lock').textContent = '🔒';
+  if (G.spect) $('#secret').dataset.act = 'revealCode'; else $('#secret').removeAttribute('data-act');
+  if (G.mode === 'online' && G.over && !G.spect) showCodeStatic(G.won ? 'cracked' : 'failed');
+  $('#palette').innerHTML = paletteHtml(d, 'color');
+  $('#gTitle').textContent = G.title || '';
+  refreshActive(false);
+  updatePoss();
+  hud();
+}
+function showCodeStatic(cls) {
+  [...$('#secretPegs').children].forEach((p, i) => { p.classList.remove('hid'); setPeg(p, G.code[i]); });
+  if (cls) $('#secret').classList.add(cls);
+}
+function hideCode() {
+  [...$('#secretPegs').children].forEach(p => { setPeg(p, null); p.classList.add('hid'); });
+}
+function buildMyRows() {
+  const d = G.d, b = $('#board');
+  b.className = 'board'; b.innerHTML = '';
+  {
     const frag = document.createDocumentFragment();
     for (let i = 0; i < d.tries; i++) {
       const r = document.createElement('div'); r.className = 'row'; r.dataset.i = i;
@@ -706,23 +759,14 @@ function buildBoard() {
       if (row.b === d.pegs) r.classList.add('win');
     });
   }
-  // code secret
-  const sp = $('#secretPegs');
-  sp.innerHTML = Array.from({ length: d.pegs }, () => '<span class="slot hid"></span>').join('');
-  $('#secret').classList.remove('cracked', 'failed');
-  $('#lock').textContent = '🔒';
-  $('#palette').innerHTML = paletteHtml(d, 'color');
-  $('#gTitle').textContent = G.title || '';
-  refreshActive(false);
-  updatePoss();
-  hud();
 }
 
 function refreshActive(scroll = true) {
   if (!G) return;
-  $$('#board .row.active').forEach(r => r.classList.remove('active'));
   const playing = !G.over && !G.spect;
   $('#dock').classList.toggle('hidden', !playing);
+  if (G.view === 'watch') return;
+  $$('#board > .row.active').forEach(r => r.classList.remove('active'));
   if (!playing) return;
   const r = rowEl(G.rows.length);
   if (!r) return;
@@ -741,6 +785,7 @@ function renderCur() {
     s.classList.toggle('sel', G.sel === k);
   });
   $('#bSubmit').classList.toggle('ready', G.cur.every(v => v != null));
+  if (G.mode === 'online') sendCur();
 }
 
 function hud() {
@@ -754,7 +799,8 @@ setInterval(hud, 250);
 
 function updatePoss() {
   const el = $('#poss');
-  if (!G || !S.poss || G.spect) { el.textContent = ''; return; }
+  if (G && G.spect) { el.innerHTML = G.showCode ? '🙈 Touche pour cacher le code' : '👆 Touche ici pour voir le code secret (chut 🤫)'; return; }
+  if (!G || !S.poss) { el.textContent = ''; return; }
   const rows = G.rows.slice();
   setTimeout(() => {
     if (!G || G.rows.length !== rows.length) return;
@@ -906,7 +952,7 @@ async function lose() {
 function afterRound() {
   if (G.mode === 'solo') soloEnd();
   else if (G.mode === 'duel') duelRoundEnd();
-  else if (G.mode === 'online') { G.busy = false; updateWait(); renderOpps(); }
+  else if (G.mode === 'online') { G.busy = false; if (Net.s?.phase === 'play' && others().length) { setView('watch'); toast('👀 Tu regardes maintenant les autres en direct', '', 2400); } updateWait(); renderOpps(); }
 }
 
 function saveProgress() {
@@ -1068,7 +1114,7 @@ function duelRoundEnd() {
 /* =========================================================
    Mode EN LIGNE (course au code)
    ========================================================= */
-const Net = { room: null, code: null, me: null, players: [], s: null, av: {}, host: false, celebrated: null, pending: null, lastReact: 0 };
+const Net = { room: null, code: null, me: null, players: [], s: null, av: {}, host: false, celebrated: null, pending: null, lastReact: 0, cur: {}, watch: null };
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const randCode = () => Array.from({ length: 4 }, () => CODE_CHARS[rnd(CODE_CHARS.length)]).join('');
 const present = () => new Set(Net.players.map(p => p.id));
@@ -1119,8 +1165,9 @@ function onPlayers() {
     if (!was && Net.s && Net.players.length > 1) toast('👑 Tu es l\'hôte de la salle');
   }
   if (Net.s?.phase === 'play' && G?.mode === 'online' && !G.spect && G.rows.length) sendProg();
+  if (Net.s?.phase === 'play' && G?.mode === 'online' && !G.spect && !G.over && G.cur.some(v => v != null)) { curLast = ''; sendCur(); }
   renderLobby(); renderOpps(); updateWait();
-  if ($('#peekModal')) renderPeek();
+  if (G?.view === 'watch' && Net.s?.phase === 'play') { watchIds().forEach(id => fillCard(id, false)); markFocus(); }
   if (Net.s?.phase === 'end' && modalOpen() && $('#endModal')) renderOnlineEnd(Net.s);
 }
 
@@ -1143,6 +1190,11 @@ function onMsg(d, from) {
   }
   else if (d.t === 'prog' && Net.host) hostMerge(d, from);
   else if (d.t === 'react' && REACTS.includes(d.e)) showReact(d.e, from);
+  else if (d.t === 'cur' && Net.s && d.gid === Net.s.gid && from.id !== Net.me && Array.isArray(d.c)) {
+    const prev = Net.cur[from.id];
+    Net.cur[from.id] = { i: +d.i || 0, c: d.c.slice(0, 8).map(v => v == null ? null : (+v) % 8) };
+    if (G?.view === 'watch') updateCurCard(from.id, prev);
+  }
 }
 
 function hostMerge(d, from) {
@@ -1200,7 +1252,7 @@ function applyState(ns, initial) {
   }
   if (ns.phase === 'play') {
     if (!G || G.mode !== 'online' || G.gid !== ns.gid) startOnline(ns, !!initial || (prev && prev.gid === ns.gid));
-    else { oppEvents(prev, ns); renderOpps(); updateWait(); if ($('#peekModal')) renderPeek(); }
+    else { oppEvents(prev, ns); if (G.view === 'watch') watchUpdate(prev, ns); renderOpps(); updateWait(); }
     return;
   }
   if (ns.phase === 'end') {
@@ -1223,7 +1275,10 @@ function startOnline(ns, reload) {
     const solved = G.rows.some(r => r.b === d.pegs);
     if (mine.done || solved || G.rows.length >= d.tries) { G.over = true; G.won = solved; G.endT = G.startT + (mine.ms || saved?.ms || 0); }
   }
+  Net.cur = {};
+  G.view = (G.over && Object.keys(ns.parts || {}).some(id => id !== Net.me)) ? 'watch' : 'me';
   showGame(); buildBoard(); renderOpps();
+  if (G.spect && ns.phase === 'play') { shout('Mode spectateur 👀', { cls: 'small', dur: 1300, sub: 'Tu joueras à la prochaine manche' }); }
   $('#reacts').innerHTML = REACTS.map(e => `<button data-act="react" data-e="${e}">${e}</button>`).join('');
   if (G.over) { $('#dock').classList.add('hidden'); updateWait(); if (!G.spect && G.rows.length) sendProg(); return; }
   if (!reload) {
@@ -1277,7 +1332,8 @@ function renderOpps() {
     const st = p.solved ? '🔓' : p.done ? '💀' : !pr.has(id) ? '🏳️' : '⏳';
     const sig = `${p.rows.length}-${p.done}`;
     const cls = [id === Net.me ? 'me' : '', p.solved ? 'solved' : p.done ? 'failed' : '', !pr.has(id) ? 'gone' : '', prevHtml[id] && prevHtml[id] !== sig ? 'bump' : ''].join(' ');
-    return `<div class="opp ${cls}" data-id="${esc(id)}" data-sig="${sig}" ${id === Net.me ? '' : 'data-act="oppPeek"'}>${avatarHtml(id, p.name, avOf(id))}<div><div class="on">${esc(p.name)}${id === Net.me ? ' (toi)' : ''}<span class="eye">👁️</span></div><div class="ot">${st} ${p.rows.length}/${d.tries} ${last ? miniFb(last.b, last.w, d.pegs) : ''}</div></div></div>`;
+    const foc = G.view === 'watch' && id === Net.watch ? 'focus' : '';
+    return `<div class="opp ${cls} ${foc}" data-id="${esc(id)}" data-sig="${sig}" data-act="oppPeek">${avatarHtml(id, p.name, avOf(id))}<div><div class="on">${esc(p.name)}${id === Net.me ? ' (toi)' : ''}<span class="eye">👁️</span></div><div class="ot">${st} ${p.rows.length}/${d.tries} ${last ? miniFb(last.b, last.w, d.pegs) : ''}</div></div></div>`;
   }).join('');
 }
 
@@ -1288,9 +1344,10 @@ function updateWait() {
   const act = Object.entries(ns.parts || {}).filter(([id]) => pr.has(id));
   const done = act.filter(([, p]) => p.done).length;
   w.classList.remove('hidden');
-  w.innerHTML = `<div>${G.spect ? '👀 Tu regardes cette manche, tu joueras à la suivante' : (G.won ? '🔓 Code cracké !' : '💀 Raté…') + ' On attend les autres'}<span class="dots"></span> <b>(${done}/${act.length})</b></div>
-    ${others().length ? '<button class="btn" data-act="oppPeek">👁️ Espionner les grilles des autres</button>' : ''}
-    ${Net.host ? '<button class="btn white" data-act="forceEnd">⏹️ Terminer la manche maintenant</button>' : ''}`;
+  const watch = G.view === 'watch', narrow = innerWidth < 700, many = watchIds().length > 1;
+  w.innerHTML = `<div>${G.spect ? '👀 Spectateur, tu joueras à la prochaine' : (G.won ? '🔓 Cracké !' : '💀 Raté…') + ' On attend les autres'}<span class="dots"></span> <b>(${done}/${act.length})</b></div>
+    ${watch && narrow && many ? '<div class="whint">👉 Glisse ou touche un joueur en haut pour changer</div>' : ''}
+    <div class="wbtns">${!G.spect && others().length ? (watch ? '<button class="btn white" data-act="myView">📋 Ma grille</button>' : '<button class="btn" data-act="watchView">👀 Regarder les autres</button>') : ''}${Net.host ? '<button class="btn white" data-act="forceEnd">⏹️ Finir la manche</button>' : ''}</div>`;
 }
 
 function onlineEnd(ns, animated) {
@@ -1343,24 +1400,128 @@ function renderLobby() {
     <div class="card lcard"><div class="ttl">👥 Joueurs <small>${n}/8</small></div><div class="lplayers">${Net.players.map((p, i) => `<div class="lp">${avatarHtml(p.id, p.name, avOf(p.id))}<span class="nm">${esc(p.name)} ${p.id === Net.me ? '<em>(toi)</em>' : ''}</span>${i === 0 ? '👑' : ''}</div>`).join('')}</div></div>
     <div class="card lcard"><div class="ttl">🎚️ Difficulté <small>${host ? 'c\'est toi qui choisis' : 'choisie par l\'hôte'}</small></div><div class="diffs">${Object.values(DIFFS).map(d => `<button class="diff ${d.key === ns.diff ? 'on' : ''}" data-act="setDiff" data-k="${d.key}" ${host ? '' : 'disabled'}><span class="de">${d.emoji}</span><span class="dl">${d.label}<small>${diffDesc(d)}</small></span></button>`).join('')}</div></div>
     ${host ? `<button class="btn big go" id="bStart" data-act="start" ${n < 2 ? 'disabled' : ''} style="justify-content:center;font-family:var(--title);font-weight:400;font-size:24px">🚀 ${n < 2 ? 'Attends tes potes…' : 'LANCER LA COURSE'}</button>` : `<p class="lwait">⏳ En attente que l'hôte lance la partie<span class="dots"></span></p>`}
-    <div class="card lcard" style="font-size:14px;font-weight:700;line-height:1.4">🏁 <b>Course au code</b> : tout le monde cherche <b>le même code</b> en même temps. Celui qui le cracke en <b>moins de coups</b> gagne, le chrono départage les égalités. Tu vois la progression des autres en direct, mais pas leurs couleurs 😏</div>`;
+    <div class="card lcard" style="font-size:14px;font-weight:700;line-height:1.4">🏁 <b>Course au code</b> : tout le monde cherche <b>le même code</b> en même temps. Celui qui le cracke en <b>moins de coups</b> gagne, le chrono départage les égalités. Pendant la course tu vois leur progression, et une fois ta grille finie tu regardes leurs coups en direct 👀</div>`;
 }
 
 const canPeek = () => !!(G && G.mode === 'online' && (G.over || G.spect) && !G.busy && Net.s && Net.s.phase === 'play');
 const others = () => Object.keys(Net.s?.parts || {}).filter(id => id !== Net.me);
-function renderPeek() {
-  const ns = Net.s; if (!ns || ns.phase !== 'play' || !canPeek()) { if ($('#peekModal')) closeModal(); return; }
-  const o = others(); if (!o.includes(Net.peekId)) Net.peekId = o[0];
-  const id = Net.peekId, p = ns.parts[id]; if (!p) return;
-  const d = ns.cfg, gone = !present().has(id);
-  const st = p.solved ? `🔓 A cracké le code en ${plural(p.rows.length, 'coup')} (${fmtT(p.ms)})` : p.done ? '💀 N\'a pas trouvé le code' : gone ? '🏳️ A quitté la salle' : `⏳ En train de chercher… essai ${p.rows.length + 1}/${d.tries}`;
-  const tail = !p.done && !gone ? '<div class="gm-r" style="opacity:.55;font-size:13px">…<span class="dots"></span></div>' : '';
-  const nav = o.length > 1;
-  openModal(`<div id="peekModal"></div><div class="peek-nav">${nav ? '<button class="ibtn" data-act="peekNav" data-d="-1">◀</button>' : ''}<div class="mh">👁️ ${esc(p.name)}</div>${nav ? '<button class="ibtn" data-act="peekNav" data-d="1">▶</button>' : ''}</div>
-    <div class="peek-st">${st}</div>
-    ${gridMini(p.rows, d, '', true, tail)}
-    <p style="font-size:12px;opacity:.6;text-align:center;margin-top:8px">Mise à jour en direct à chaque coup${nav ? ` · ${o.indexOf(id) + 1}/${o.length}` : ''}</p>
-    <div class="mbtns"><button class="btn go" data-act="close">Fermer</button></div>`);
+const watchIds = () => { const ps = Net.s?.parts || {}; return Object.keys(ps).filter(id => id !== Net.me); };
+function setView(v) {
+  if (!G || G.mode !== 'online') return;
+  if (v === 'watch' && !watchIds().length) v = 'me';
+  G.view = v;
+  if (v === 'watch') renderWatch(); else { buildMyRows(); refreshActive(true); }
+  renderOpps(); updateWait();
+}
+function wSizes() {
+  const b = $('#board'), d = Net.s.cfg, wide = innerWidth >= 700;
+  const W = (wide ? 330 : (b.clientWidth || innerWidth) - 24) - 16 - 6;
+  const half = Math.ceil(d.pegs / 2);
+  const rhs = W - 24 - 20 - (d.pegs - 1) * 7 - half * 4 - 14;
+  const peg = Math.max(22, Math.min(44, Math.floor(rhs / (d.pegs + half * .3))));
+  return { peg, fbp: Math.max(8, Math.min(14, Math.round(peg * .3))) };
+}
+function renderWatch() {
+  const b = $('#board'); b.className = 'board watch';
+  const ids = watchIds();
+  if (!Net.s || !ids.length) { b.innerHTML = '<div class="watch-empty">Personne d\'autre à regarder… 🦗</div>'; return; }
+  const { peg, fbp } = wSizes();
+  b.style.setProperty('--wpeg', peg + 'px'); b.style.setProperty('--wfbp', fbp + 'px');
+  if (!ids.includes(Net.watch)) {
+    // par défaut : quelqu'un qui joue encore
+    const pr = present();
+    Net.watch = ids.find(id => !Net.s.parts[id].done && pr.has(id)) || ids[0];
+  }
+  b.innerHTML = ids.map(id => `<div class="wcard" data-id="${esc(id)}"></div>`).join('');
+  ids.forEach(id => fillCard(id, false));
+  markFocus();
+  requestAnimationFrame(() => scrollToCard(Net.watch, false));
+}
+const cardEl = id => document.querySelector(`.wcard[data-id="${CSS.escape(id)}"]`);
+function wRow(i, g, b, w, cls, d) {
+  return `<div class="row ${cls}" data-i="${i}"><div class="rnum">${i + 1}</div><div class="pegs">${Array.from({ length: d.pegs }, (_, k) => pegHtml(g ? (g[k] ?? null) : null)).join('')}</div><div class="fb" style="--fbc:${Math.ceil(d.pegs / 2)}">${Array.from({ length: d.pegs }, (_, k) => `<i class="${b == null ? '' : k < b ? 'bk' : k < b + w ? 'wh' : 'no'}"></i>`).join('')}</div></div>`;
+}
+function curFor(id) { const c = Net.cur[id], p = Net.s?.parts?.[id]; return c && p && c.i === p.rows.length ? c.c : null; }
+function fillCard(id, animNew) {
+  const c = cardEl(id), ns = Net.s; if (!c || !ns?.parts?.[id]) return;
+  const p = ns.parts[id], d = ns.cfg, gone = !present().has(id), live = !p.done && !gone;
+  const st = p.solved ? `🔓 Cracké en ${plural(p.rows.length, 'coup')} · ${fmtT(p.ms)}` : p.done ? '💀 N\'a pas trouvé' : gone ? '🏳️ A quitté la salle' : `⏳ Essai ${p.rows.length + 1}/${d.tries}`;
+  c.className = 'wcard' + (p.solved ? ' solved' : p.done ? ' failed' : '') + (gone ? ' gone' : '') + (id === Net.watch ? ' focus' : '');
+  const cur = curFor(id);
+  let rows = '';
+  for (let i = 0; i < d.tries; i++) {
+    if (i < p.rows.length) { const r = p.rows[i]; rows += wRow(i, r.g, r.b, r.w, 'done' + (r.b === d.pegs ? ' win' : '') + (animNew && i === p.rows.length - 1 ? ' fresh' : ''), d); }
+    else if (i === p.rows.length && live) rows += wRow(i, cur, null, 0, 'active', d);
+    else rows += wRow(i, null, null, 0, '', d);
+  }
+  c.innerHTML = `<div class="wh">${avatarHtml(id, p.name, avOf(id))}<div class="wn"><b>${esc(p.name)}</b><span>${st}</span></div>${live ? '<span class="live">● LIVE</span>' : ''}</div><div class="wrows">${rows}</div>`;
+  const wr = c.querySelector('.wrows'), target = c.querySelector('.row.active') || c.querySelector('.row.fresh') || c.querySelectorAll('.row.done')[p.rows.length - 1];
+  if (target) wr.scrollTop = Math.max(0, target.offsetTop - wr.clientHeight / 2 + target.offsetHeight / 2);
+  if (animNew) {
+    const r = c.querySelector('.row.fresh'), focus = id === Net.watch || innerWidth >= 700;
+    if (r) {
+      const last = p.rows[p.rows.length - 1];
+      [...r.querySelectorAll('.fb i.bk')].forEach((f, k) => setTimeout(() => { const [x, y] = FX.at(f); FX.sparks(x, y, '#ffd426', 8); if (focus) Sfx.black(k); }, 80 + k * 110));
+      if (last.b + last.w === 0 && focus) Sfx.none();
+      if (last.b === d.pegs) { const [x, y] = FX.at(c); FX.burst(x, y, { n: 50 }); FX.ring(x, y, '#2ee06f', 12, 8); c.classList.add('pulse'); }
+      else if (p.done) { nope(c); const [x, y] = FX.at(c); FX.burst(x, y, { n: 25, colors: ['#ff3b4f', '#12102b'] }); }
+    }
+  }
+}
+function updateCurCard(id, prev) {
+  const c = cardEl(id); if (!c) return;
+  const r = c.querySelector('.row.active'); if (!r) return;
+  const cur = curFor(id) || [], old = prev && prev.i === Net.cur[id]?.i ? prev.c : [];
+  const focus = id === Net.watch || innerWidth >= 700;
+  [...r.querySelectorAll('.pegs .slot')].forEach((s, k) => {
+    const v = cur[k] ?? null;
+    if (v === (old[k] ?? null)) return;
+    setPeg(s, v);
+    if (v != null) {
+      s.classList.remove('pop'); void s.offsetWidth; s.classList.add('pop');
+      if (focus) { const [x, y] = FX.at(s); FX.sparks(x, y, COLORS[v].c, 6); Sfx.tone(392 * Math.pow(1.122, v), .08, 'triangle', .05, 1.25); }
+    }
+  });
+}
+function watchUpdate(prev, ns) {
+  watchIds().forEach(id => {
+    const a = prev?.parts?.[id], p = ns.parts[id]; if (!p) return;
+    const grew = a && p.rows.length > a.rows.length;
+    if (!a || grew || a.done !== p.done) fillCard(id, !!grew);
+  });
+}
+function markFocus() {
+  $$('.wcard').forEach(c => c.classList.toggle('focus', c.dataset.id === Net.watch));
+  $$('#opps .opp').forEach(o => o.classList.toggle('focus', G?.view === 'watch' && o.dataset.id === Net.watch));
+  const chip = document.querySelector(`#opps .opp.focus`);
+  if (chip) { const box = $('#opps'); box.scrollTo({ left: chip.offsetLeft - box.clientWidth / 2 + chip.offsetWidth / 2, behavior: 'smooth' }); }
+}
+function scrollToCard(id, smooth = true) {
+  const c = cardEl(id), b = $('#board'); if (!c) return;
+  if (innerWidth >= 700) b.scrollTo({ top: c.offsetTop - 8, behavior: smooth ? 'smooth' : 'auto' });
+  else b.scrollTo({ left: c.offsetLeft - 12, behavior: smooth ? 'smooth' : 'auto' });
+}
+let wsT = 0;
+$('#board').addEventListener('scroll', () => {
+  if (G?.view !== 'watch' || innerWidth >= 700) return;
+  clearTimeout(wsT);
+  wsT = setTimeout(() => {
+    const b = $('#board'), cards = [...b.querySelectorAll('.wcard')]; if (!cards.length) return;
+    const idx = Math.max(0, Math.min(cards.length - 1, Math.round(b.scrollLeft / (cards[0].offsetWidth + 12))));
+    const id = cards[idx].dataset.id;
+    if (id !== Net.watch) { Net.watch = id; markFocus(); }
+  }, 90);
+}, { passive: true });
+// Envoi en direct des pions posés (limité pour respecter le quota du hub)
+let curLast = '', curTimer = 0, curAt = 0;
+function sendCur() {
+  if (!G || G.mode !== 'online' || !Net.room || G.spect || !G.gid) return;
+  const sig = JSON.stringify([G.rows.length, G.cur]);
+  if (sig === curLast) return;
+  const wait = 160 - (Date.now() - curAt);
+  if (wait > 0) { clearTimeout(curTimer); curTimer = setTimeout(sendCur, wait); return; }
+  curLast = sig; curAt = Date.now();
+  try { Net.room.send({ t: 'cur', gid: G.gid, i: G.rows.length, c: G.cur }); } catch (e) {}
 }
 
 function showReact(e, from) {
@@ -1449,12 +1610,21 @@ const ACT = {
     $('#peek').innerHTML = gridMini(p.rows, Net.s.cfg, `Grille de <b>${esc(p.name)}</b>`);
   },
   oppPeek: t => {
-    if (!canPeek()) { toast('🔒 Finis ta grille d\'abord, après tu pourras espionner les autres 😏', '', 2500); Sfx.err(); return; }
-    const o = others(); if (!o.length) return;
-    Net.peekId = t.dataset.id && o.includes(t.dataset.id) ? t.dataset.id : (o.includes(Net.peekId) ? Net.peekId : o[0]);
-    Sfx.whoosh(); renderPeek();
+    const id = t.dataset.id;
+    if (id === Net.me) { if (G?.view === 'watch' && !G.spect) { setView('me'); Sfx.pop(); } return; }
+    if (!canPeek()) { toast('🔒 Finis ta grille d\'abord, après tu pourras regarder les autres jouer 😏', '', 2500); Sfx.err(); return; }
+    Net.watch = id;
+    if (G.view !== 'watch') setView('watch'); else { markFocus(); scrollToCard(id); }
+    Sfx.whoosh();
   },
-  peekNav: t => { const o = others(); if (!o.length) return; const i = o.indexOf(Net.peekId); Net.peekId = o[(i + (+t.dataset.d) + o.length) % o.length]; Sfx.pop(); renderPeek(); },
+  watchView: () => { if (canPeek()) { setView('watch'); Sfx.whoosh(); } },
+  myView: () => { setView('me'); Sfx.pop(); },
+  revealCode: () => {
+    if (!G?.spect) return;
+    G.showCode = !G.showCode;
+    if (G.showCode) { showCodeStatic(); Sfx.whoosh(); } else hideCode();
+    updatePoss();
+  },
   react: t => {
     const now = Date.now(); if (now - Net.lastReact < 700 || !Net.room) return; Net.lastReact = now;
     try { Net.room.send({ t: 'react', e: t.dataset.e }); } catch (e) {}
@@ -1478,7 +1648,8 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowLeft') moveSel(-1);
   else if (e.key === 'ArrowRight') moveSel(1);
 });
-addEventListener('resize', () => sizeBoard());
+let rsT = 0;
+addEventListener('resize', () => { sizeBoard(); clearTimeout(rsT); rsT = setTimeout(() => { if (G?.view === 'watch' && Net.s?.phase !== 'lobby') renderWatch(); updateWait(); }, 150); });
 
 /* =========================================================
    Accueil & démarrage
