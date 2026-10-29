@@ -1,0 +1,13 @@
+{
+  "title": "Chad Mastermind",
+  "description": "Cracke le code secret avant tes potes : déduction, sueurs froides et explosions de confettis.",
+  "author": "Léo",
+  "category": "Réflexion",
+  "emoji": "🧠",
+  "image": "cover.png",
+  "classement": "victoires",
+  "titre": "Course en ligne",
+  "classements": [
+    { "id": "solo", "titre": "Solo", "classement": "score", "unite": "pts" }
+  ]
+}
